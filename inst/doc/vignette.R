@@ -11,17 +11,17 @@ library(data.table)
 library(ggplot2)
 
 # Set seed
-set.seed(123)
+set.seed(123, "L'Ecuyer-CMRG")
 
 # Train ARF
 arf <- adversarial_rf(iris)
 
 ## ----arf2, fig.height=5, fig.width=5------------------------------------------
-# Train ARF with no print outs
+# Train ARF with no printouts
 arf <- adversarial_rf(iris, verbose = FALSE)
 
 # Plot accuracy against iterations (model converges when accuracy <= 0.5)
-tmp <- data.frame('acc' = arf$acc, 'iter' = seq_len(length(arf$acc)) - 1)
+tmp <- data.frame('acc' = arf$acc, 'iter' = seq_len(length(arf$acc)))
 ggplot(tmp, aes(iter, acc)) + 
   geom_point() + 
   geom_path() +
@@ -49,6 +49,19 @@ params <- forde(arf, iris)
 ## ----forde_unif---------------------------------------------------------------
 # Recompute with uniform density
 params_unif <- forde(arf, iris, family = 'unif')
+
+## ----dirichlet----------------------------------------------------------------
+# Recompute with additive smoothing
+params_alpha <- forde(arf, iris, alpha = 0.1)
+
+# Compare results
+head(params$cat)
+head(params_alpha$cat)
+
+## ----unity--------------------------------------------------------------------
+# Sum probabilities
+summary(params$cat[, sum(prob), by = .(f_idx, variable)]$V1)
+summary(params_alpha$cat[, sum(prob), by = .(f_idx, variable)]$V1)
 
 ## ----forde2-------------------------------------------------------------------
 params
@@ -113,13 +126,13 @@ length(unique(diamonds$price))
 # Re-class 
 diamonds$price <- as.numeric(diamonds$price)
 
-# Take a random subsample of size 1000
-s_idx <- sample(1:nrow(diamonds), 1000)
+# Take a random subsample of size 2000
+s_idx <- sample(1:nrow(diamonds), 2000)
 
 # Train ARF
 arf <- adversarial_rf(diamonds[s_idx, ])
 
-# Fit density
+# Estimate parameters
 params <- forde(arf, diamonds[s_idx, ])
 
 # Check distributional families
@@ -130,10 +143,25 @@ synth <- forge(params, n_synth = 1000)
 hist(synth$price)
 
 ## ----lb, fig.height=5, fig.width=5--------------------------------------------
-# Set price minimum to zero
-params$cnt[variable == 'price', min := 0]
+# Set price minimum to empirical lower bound
+params$cnt[variable == 'price', min := min(diamonds$price)]
 
-# Re-forge
+# Re-forge, check histogram
 synth <- forge(params, n_synth = 1000)
 hist(synth$price)
+
+## ----lprice, fig.height=5, fig.width=5----------------------------------------
+# Transform price variable
+tmp <- as.data.table(diamonds[s_idx, ])
+tmp[, price := log(price)]
+
+# Retrain ARF
+arf <- adversarial_rf(tmp)
+
+# Estimate parameters
+params <- forde(arf, tmp)
+
+# Forge, check histogram
+synth <- forge(params, n_synth = 1000)
+hist(exp(synth$price))
 
