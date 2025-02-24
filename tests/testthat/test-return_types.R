@@ -36,14 +36,14 @@ test_that("Likelihood calculation returns vector of log-likelihoods", {
 test_that("FORGE returns data frame when called with data frame", {
   arf <- adversarial_rf(iris, num_trees = 2, verbose = FALSE, parallel = FALSE)
   psi <- forde(arf, iris, parallel = FALSE)
-  x_synth <- forge(psi, n_synth = 20)
+  x_synth <- forge(psi, n_synth = 20, parallel = FALSE)
   expect_s3_class(x_synth, "data.frame")
 })
 
 test_that("FORGE returns data table when called with data table", {
   arf <- adversarial_rf(data.table::as.data.table(iris), num_trees = 2, verbose = FALSE, parallel = FALSE)
   psi <- forde(arf, data.table::as.data.table(iris), parallel = FALSE)
-  x_synth <- forge(psi, n_synth = 20)
+  x_synth <- forge(psi, n_synth = 20, parallel = FALSE)
   expect_s3_class(x_synth, "data.table")
 })
 
@@ -54,22 +54,29 @@ test_that("FORGE returns matrix when called with matrix", {
   
   arf <- adversarial_rf(x, num_trees = 2, verbose = FALSE, parallel = FALSE)
   psi <- forde(arf, x, parallel = FALSE)
-  x_synth <- forge(psi, n_synth = 20)
+  x_synth <- forge(psi, n_synth = 20, parallel = FALSE)
   expect_type(x_synth, "double")
   expect_true(is.matrix(x_synth))
 })
 
-test_that("FORGE returns same column types", {
+test_that("FORGE returns correct column types", {
+  if (utils::packageVersion("ranger") < "0.16.1") {
+    skip("can only test this with recent ranger version.")
+  }
+  
   n <- 50
   dat <- data.frame(numeric = rnorm(n), 
-                    integer = sample(1L:5L, n, replace = TRUE), 
+                    integer_factor = sample(1L:5L, n, replace = TRUE),
+                    integer_numeric = sample(1L:50L, n, replace = FALSE), 
                     character = sample(letters[1:5], n, replace = TRUE), 
                     factor = factor(sample(letters[1:5], n, replace = TRUE)), 
                     logical = (sample(0:1, n, replace = TRUE) == 1))
   
-  expect_warning(arf <- adversarial_rf(dat, num_trees = 2, verbose = FALSE, parallel = FALSE))
+  arf <- adversarial_rf(dat, num_trees = 2, verbose = FALSE, parallel = FALSE)
   psi <- forde(arf, dat, parallel = FALSE)
-  x_synth <- forge(psi, n_synth = 20)
+  
+  # with round = TRUE
+  x_synth <- forge(psi, n_synth = 20, parallel = FALSE)
   
   # No NAs
   expect_true(all(!is.na(x_synth)))
@@ -78,6 +85,41 @@ test_that("FORGE returns same column types", {
   classes <- sapply(dat, class)
   classes_synth <- sapply(x_synth, class)
   expect_equal(classes, classes_synth)
+  
+  # with round = FALSE
+  x_synth <- forge(psi, n_synth = 20, round = FALSE, parallel = FALSE)
+  
+  # Keep non-integer_numeric column types
+  classes <- sapply(dat, class)
+  classes_synth <- sapply(x_synth, class)
+  expect_equal(classes[-3], classes_synth[-3])
+  # Output integer_numeric as numeric
+  expect_true(classes_synth[3] == "numeric")
+})
+
+test_that("FORGE does not round to real data set precision if 'round == FALSE'", {
+  arf <- adversarial_rf(iris, num_trees = 2, verbose = FALSE, parallel = FALSE)
+  psi <- forde(arf, iris, parallel = FALSE)
+  x_synth <- forge(psi, n_synth = 20, round = FALSE, parallel = FALSE)
+  x_synth_rounded <- arf:::post_x(x_synth, psi, round = TRUE)
+  
+  # Check if continuous variables were not rounded
+  expect_false(all(x_synth[,1:4] == x_synth_rounded[,1:4]))
+  expect_equal(data.frame(lapply(x_synth[,1:4], round, 1)), x_synth_rounded[,1:4])
+})
+
+test_that("FORGE returns factors with same levels (and order of levels)", {
+  arf <- adversarial_rf(iris, num_trees = 2, verbose = FALSE, parallel = FALSE)
+  psi <- forde(arf, iris, parallel = FALSE)
+  x_synth <- forge(psi, n_synth = 10, parallel = FALSE)
+  expect_equal(levels(x_synth$Species), levels(iris$Species))
+})
+
+test_that("EXPCT returns factors with same levels (and order of levels)", {
+  arf <- adversarial_rf(iris, num_trees = 2, verbose = FALSE, parallel = FALSE)
+  psi <- forde(arf, iris, parallel = FALSE)
+  x_synth <- expct(psi, parallel = FALSE)
+  expect_equal(levels(x_synth$Species), levels(iris$Species))
 })
 
 # test_that("MAP returns proper column types", {

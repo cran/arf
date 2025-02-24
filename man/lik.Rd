@@ -43,7 +43,7 @@ However, with large samples or many trees, it can be more memory efficient
 to split the data into batches. This has no impact on results.}
 
 \item{parallel}{Compute in parallel? Must register backend beforehand, e.g.
-via \code{doParallel}.}
+via \code{doParallel} or \code{doFuture}; see examples.}
 }
 \value{
 A vector of likelihoods, optionally on the log scale.
@@ -66,9 +66,11 @@ distribution over leaves, with columns \code{f_idx} and \code{wt}. This may
 be preferable for complex constraints. See Examples.
 }
 \examples{
-# Estimate average log-likelihood
+# Train ARF and estimate leaf parameters
 arf <- adversarial_rf(iris)
 psi <- forde(arf, iris)
+
+# Estimate average log-likelihood
 ll <- lik(psi, iris, arf = arf, log = TRUE)
 mean(ll)
 
@@ -84,11 +86,18 @@ evi <- data.frame(Species = "setosa")
 lik(psi, query = iris[1, 1:3], evidence = evi)
 
 # Condition on Species = "setosa" and Petal.Width > 0.3
-evi <- data.frame(variable = c("Species", "Petal.Width"),
-                  relation = c("==", ">"), 
-                  value = c("setosa", 0.3))
+evi <- data.frame(Species = "setosa", 
+                  Petal.Width = ">0.3")
 lik(psi, query = iris[1, 1:3], evidence = evi)
 
+\dontrun{
+# Parallelization with doParallel
+doParallel::registerDoParallel(cores = 4)
+
+# ... or with doFuture
+doFuture::registerDoFuture()
+future::plan("multisession", workers = 4)
+}
 
 }
 \references{
@@ -98,5 +107,5 @@ of the 26th International Conference on Artificial Intelligence and
 Statistics}, pp. 5357-5375.
 }
 \seealso{
-\code{\link{adversarial_rf}}, \code{\link{forge}}
+\code{\link{arf}}, \code{\link{adversarial_rf}}, \code{\link{forde}}, \code{\link{forge}}, \code{\link{expct}}
 }

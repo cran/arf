@@ -4,19 +4,52 @@
 \alias{expct}
 \title{Expected Value}
 \usage{
-expct(params, query = NULL, evidence = NULL)
+expct(
+  params,
+  query = NULL,
+  evidence = NULL,
+  evidence_row_mode = c("separate", "or"),
+  round = FALSE,
+  nomatch = c("force", "na"),
+  verbose = TRUE,
+  stepsize = 0,
+  parallel = TRUE
+)
 }
 \arguments{
 \item{params}{Circuit parameters learned via \code{\link{forde}}.}
 
 \item{query}{Optional character vector of variable names. Estimates will be
 computed for each. If \code{NULL}, all variables other than those in
-\code{evidence} will be estimated.}
+\code{evidence} will be estimated. If \code{evidence} contains \code{NA}s,
+those values will be imputed and a full dataset is returned.}
 
 \item{evidence}{Optional set of conditioning events. This can take one of
-three forms: (1) a partial sample, i.e. a single row of data with some but
-not all columns; (2) a data frame of conditioning events, which allows for
-inequalities; or (3) a posterior distribution over leaves. See Details.}
+three forms: (1) a partial sample, i.e. a single row of data with
+some but not all columns; (2) a data frame of conditioning events,
+which allows for inequalities and intervals; or (3) a posterior
+distribution over leaves. See Details and Examples.}
+
+\item{evidence_row_mode}{Interpretation of rows in multi-row evidence. If
+\code{"separate"}, each row in \code{evidence} is a unique conditioning
+event for which \code{n_synth} synthetic samples are generated. If
+\code{"or"}, the rows are combined with a logical OR. See Examples.}
+
+\item{round}{Round continuous variables to their respective maximum precision
+in the real data set?}
+
+\item{nomatch}{What to do if no leaf matches a condition in \code{evidence}?
+Options are to force sampling from a random leaf (\code{"force"}) or return
+\code{NA} (\code{"na"}). The default is \code{"force"}.}
+
+\item{verbose}{Show warnings, e.g. when no leaf matches a condition?}
+
+\item{stepsize}{How many rows of evidence should be handled at each step?
+Defaults to \code{nrow(evidence) / num_registered_workers} for
+\code{parallel == TRUE}.}
+
+\item{parallel}{Compute in parallel? Must register backend beforehand, e.g.
+via \code{doParallel} or \code{doFuture}; see Examples.}
 }
 \value{
 A one row data frame with values for all query variables.
@@ -28,13 +61,25 @@ on some event(s).
 \details{
 This function computes expected values for any subset of features, optionally
 conditioned on some event(s).
+
+There are three methods for (optionally) encoding conditioning events via the
+\code{evidence} argument. The first is to provide a partial sample, where
+some columns from the training data are missing or set to \code{NA}. The
+second is to provide a data frame with condition events. This supports
+inequalities and intervals. Alternatively, users may directly input a
+pre-calculated posterior distribution over leaves, with columns \code{f_idx}
+and \code{wt}. This may be preferable for complex constraints. See Examples.
+
+Please note that results for continuous features which are both included in
+\code{query} and in \code{evidence} with an interval condition are currently
+inconsistent.
 }
 \examples{
-# Train ARF and corresponding circuit
+# Train ARF and estimate leaf parameters
 arf <- adversarial_rf(iris)
 psi <- forde(arf, iris)
 
-# What is the expected value Sepal.Length?
+# What is the expected value of Sepal.Length?
 expct(psi, query = "Sepal.Length")
 
 # What if we condition on Species = "setosa"?
@@ -44,6 +89,26 @@ expct(psi, query = "Sepal.Length", evidence = evi)
 # Compute expectations for all features other than Species
 expct(psi, evidence = evi)
 
+# Condition on Species = "setosa" and Petal.Width > 0.3
+evi <- data.frame(Species = "setosa", 
+                  Petal.Width = ">0.3")
+expct(psi, evidence = evi)
+
+# Condition on first two rows with some missing values
+evi <- iris[1:2,]
+evi[1, 1] <- NA_real_
+evi[1, 5] <- NA_character_
+evi[2, 2] <- NA_real_
+x_synth <- expct(psi, evidence = evi)
+
+\dontrun{
+# Parallelization with doParallel
+doParallel::registerDoParallel(cores = 4)
+
+# ... or with doFuture
+doFuture::registerDoFuture()
+future::plan("multisession", workers = 4)
+}
 
 }
 \references{
@@ -53,5 +118,6 @@ of the 26th International Conference on Artificial Intelligence and
 Statistics}, pp. 5357-5375.
 }
 \seealso{
-\code{\link{adversarial_rf}}, \code{\link{forde}}, \code{\link{lik}}
+\code{\link{arf}}, \code{\link{adversarial_rf}}, \code{\link{forde}},
+\code{\link{forge}}, \code{\link{lik}}
 }

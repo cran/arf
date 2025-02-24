@@ -1,8 +1,8 @@
 ---
-title: "Package Vignette"
+title: "Adversarial Random Forests"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{Density Estimation}
+  %\VignetteIndexEntry{Adversarial Random Forests}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -223,19 +223,17 @@ The partial observation method of passing evidence requires users to specify uni
 
 ```{r cond2}
 # Data frame of conditioning events
-evi <- data.frame(variable = c('Species', 'Petal.Width'),
-                  relation = c('==', '>'), 
-                  value = c('setosa', 0.3))
+evi <- data.frame(Species = "setosa", 
+                  Petal.Width = ">0.3")
 evi
 ```
-Each row is treated as an extra condition, so we can define intervals by putting multiple constraints on a single variable.
+We can also define intervals:
 ```{r cond3}
-evi <- data.frame(variable = c('Species', 'Petal.Width', 'Petal.Width'),
-                  relation = c('==', '>', '<='), 
-                  value = c('setosa', 0.3, 0.5))
+evi <- data.frame(Species = "setosa", 
+                  Petal.Width = "(0.3,0.5)")
 evi
 ```
-Resulting likelihoods will be computed on the condition that all queries are drawn from setosa flowers with petal width on the interval $(0.3, 0.5]$. 
+Resulting likelihoods will be computed on the condition that all queries are drawn from setosa flowers with petal width on the interval $(0.3, 0.5)$. 
 
 A final method for passing evidence is to directly compute a posterior distribution on leaves. This could be useful for particularly complex conditioning events for which there is currently no inbuilt interface, such as polynomial constraints or arbitrary propositions in disjunctive normal form. In this case, we just require a data frame with columns for `f_idx` and `wt`. If the latter does not sum to unity, the distribution will be normalized with a warning.
 ```{r cond4}
@@ -272,5 +270,39 @@ expct(params_smiley, evidence = evi)
 ```
 
 These are the average $X, Y$ coordinates for the smile above.
+
+# Data imputation
+
+ARFs can be used to impute missing values in datasets. This can be done either on a one-shot basis, in which case we plug in the (conditional) expectation of the feature(s) with missing values; or as a multiple imputation routine, in which case we sample values from the relevant (conditional) distribution. 
+
+For instance, consider the palmer penguins dataset, which includes several missing values. 
+
+```{r imp1}
+# Load palmer penguins dataset
+library(palmerpenguins)
+head(penguins)
+```
+
+We can fill in the NA's in row 4 with their expected value, conditional on the non-NA values (`species` and `island`) as follows:
+
+```{r imp2}
+# Single imputation
+penguins_imp <- impute(penguins)
+head(penguins_imp)
+```
+
+Alternatively, we can perform multiple imputation to get a better sense of the range of plausible values in these conditional distributions.
+
+```{r imp3, fig.height=6, fig.width=6}
+# Multiple imputation
+penguins_multiple_imp <- impute(penguins, m = 100)
+
+# Check the distribution of bill_length_mm for sample 4
+tmp <- sapply(penguins_multiple_imp, function(dat) dat$bill_length_mm[4])
+hist(tmp, breaks = 20)
+```
+
+
+
 
 

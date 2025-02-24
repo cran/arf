@@ -4,7 +4,18 @@
 \alias{forge}
 \title{Forests for Generative Modeling}
 \usage{
-forge(params, n_synth, evidence = NULL)
+forge(
+  params,
+  n_synth,
+  evidence = NULL,
+  evidence_row_mode = c("separate", "or"),
+  round = TRUE,
+  sample_NAs = FALSE,
+  nomatch = c("force", "na"),
+  verbose = TRUE,
+  stepsize = 0,
+  parallel = TRUE
+)
 }
 \arguments{
 \item{params}{Circuit parameters learned via \code{\link{forde}}.}
@@ -12,10 +23,33 @@ forge(params, n_synth, evidence = NULL)
 \item{n_synth}{Number of synthetic samples to generate.}
 
 \item{evidence}{Optional set of conditioning events. This can take one of
-three forms: (1) a partial sample, i.e. a single row of data with
-some but not all columns; (2) a data frame of conditioning events,
-which allows for inequalities; or (3) a posterior distribution over leaves.
-See Details.}
+three forms: (1) a partial sample, i.e. a single row of data with some but
+not all columns; (2) a data frame of conditioning events, which allows for
+inequalities; or (3) a posterior distribution over leaves. See Details.}
+
+\item{evidence_row_mode}{Interpretation of rows in multi-row evidence. If
+\code{"separate"}, each row in \code{evidence} is a unique conditioning
+event for which \code{n_synth} synthetic samples are generated. If
+\code{"or"}, the rows are combined with a logical OR. See Examples.}
+
+\item{round}{Round continuous variables to their respective maximum precision
+in the real data set?}
+
+\item{sample_NAs}{Sample \code{NA}s respecting the probability for missing
+values in the original data?}
+
+\item{nomatch}{What to do if no leaf matches a condition in \code{evidence}?
+Options are to force sampling from a random leaf (\code{"force"}) or return
+\code{NA} (\code{"na"}). The default is \code{"force"}.}
+
+\item{verbose}{Show warnings, e.g. when no leaf matches a condition?}
+
+\item{stepsize}{How many rows of evidence should be handled at each step?
+Defaults to \code{nrow(evidence) / num_registered_workers} for
+\code{parallel == TRUE}.}
+
+\item{parallel}{Compute in parallel? Must register backend beforehand, e.g.
+via \code{doParallel} or \code{doFuture}; see examples.}
 }
 \value{
 A dataset of \code{n_synth} synthetic samples.
@@ -34,27 +68,43 @@ local independence criterion. See Watson et al. (2023).
 
 There are three methods for (optionally) encoding conditioning events via the
 \code{evidence} argument. The first is to provide a partial sample, where
-some but not all columns from the training data are present. The second is to
-provide a data frame with three columns: \code{variable}, \code{relation},
-and \code{value}. This supports inequalities via \code{relation}.
-Alternatively, users may directly input a pre-calculated posterior
-distribution over leaves, with columns \code{f_idx} and \code{wt}. This may
-be preferable for complex constraints. See Examples.
+some columns from the training data are missing or set to \code{NA}. The
+second is to provide a data frame with condition events. This supports
+inequalities and intervals. Alternatively, users may directly input a
+pre-calculated posterior distribution over leaves, with columns \code{f_idx}
+and \code{wt}. This may be preferable for complex constraints. See Examples.
 }
 \examples{
+# Train ARF and estimate leaf parameters
 arf <- adversarial_rf(iris)
 psi <- forde(arf, iris)
+
+# Generate 100 synthetic samples from the iris dataset
 x_synth <- forge(psi, n_synth = 100)
 
 # Condition on Species = "setosa"
 evi <- data.frame(Species = "setosa")
 x_synth <- forge(psi, n_synth = 100, evidence = evi)
 
-# Condition in Species = "setosa" and Sepal.Length > 6
-evi <- data.frame(variable = c("Species", "Sepal.Length"),
-                  relation = c("==", ">"), 
-                  value = c("setosa", 6))
+# Condition on Species = "setosa" and Sepal.Length > 6
+evi <- data.frame(Species = "setosa",
+                  Sepal.Length = "(6, Inf)")
 x_synth <- forge(psi, n_synth = 100, evidence = evi)
+
+# Alternative syntax for </> conditions
+evi <- data.frame(Sepal.Length = ">6")
+x_synth <- forge(psi, n_synth = 100, evidence = evi)
+
+# Negation condition, i.e. all classes except "setosa"
+evi <- data.frame(Species = "!setosa")
+x_synth <- forge(psi, n_synth = 100, evidence = evi)
+
+# Condition on first two data rows with some missing values
+evi <- iris[1:2,]
+evi[1, 1] <- NA_real_
+evi[1, 5] <- NA_character_
+evi[2, 2] <- NA_real_
+x_synth <- forge(psi, n_synth = 1, evidence = evi)
 
 # Or just input some distribution on leaves
 # (Weights that do not sum to unity are automatically scaled)
@@ -62,6 +112,14 @@ n_leaves <- nrow(psi$forest)
 evi <- data.frame(f_idx = psi$forest$f_idx, wt = rexp(n_leaves))
 x_synth <- forge(psi, n_synth = 100, evidence = evi)
 
+\dontrun{
+# Parallelization with doParallel
+doParallel::registerDoParallel(cores = 4)
+
+# ... or with doFuture
+doFuture::registerDoFuture()
+future::plan("multisession", workers = 4)
+}
 
 }
 \references{
@@ -71,5 +129,6 @@ of the 26th International Conference on Artificial Intelligence and
 Statistics}, pp. 5357-5375.
 }
 \seealso{
-\code{\link{adversarial_rf}}, \code{\link{forde}}
+\code{\link{arf}}, \code{\link{adversarial_rf}}, \code{\link{forde}},
+\code{\link{expct}}, \code{\link{lik}}
 }

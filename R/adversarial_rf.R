@@ -14,9 +14,10 @@
 #' @param early_stop Terminate loop if performance fails to improve from one 
 #'   round to the next? 
 #' @param prune Impose \code{min_node_size} by pruning? 
-#' @param verbose Print discriminator accuracy after each round?
+#' @param verbose Print discriminator accuracy after each round? Will also show 
+#'   additional warnings.
 #' @param parallel Compute in parallel? Must register backend beforehand, e.g. 
-#'   via \code{doParallel}.
+#'   via \code{doParallel} or \code{doFuture}; see examples.
 #' @param ... Extra parameters to be passed to \code{ranger}.
 #' 
 #' @details 
@@ -37,10 +38,11 @@
 #' trees for improved performance (typically on the order of 100-1000 depending 
 #' on sample size).
 #' 
-#' Integer variables are recoded with a warning. Default behavior is to convert
-#' those with six or more unique values to numeric, while those with up to five
-#' unique values are treated as ordered factors. To override this behavior, 
-#' explicitly recode integer variables to the target type prior to training.
+#' Integer variables are recoded with a warning (set \code{verbose = FALSE} to 
+#' silence these). Default behavior is to convert integer variables with six or
+#' more unique values to numeric, while those with up to five unique values are 
+#' treated as ordered factors. To override this behavior, explicitly recode 
+#' integer variables to the target type prior to training.
 #' 
 #' Note: convergence is not guaranteed in finite samples. The \code{max_iters} 
 #' argument sets an upper bound on the number of training rounds. Similar 
@@ -63,12 +65,38 @@
 #' 
 #' 
 #' @examples
+#' # Train ARF and estimate leaf parameters
 #' arf <- adversarial_rf(iris)
+#' psi <- forde(arf, iris)
 #' 
+#' # Generate 100 synthetic samples from the iris dataset
+#' x_synth <- forge(psi, n_synth = 100)
+#'
+#' # Condition on Species = "setosa" and Sepal.Length > 6
+#' evi <- data.frame(Species = "setosa",
+#'                   Sepal.Length = "(6, Inf)")
+#' x_synth <- forge(psi, n_synth = 100, evidence = evi)
+#' 
+#' # Estimate average log-likelihood
+#' ll <- lik(psi, iris, arf = arf, log = TRUE)
+#' mean(ll)
+#' 
+#' # Expectation of Sepal.Length for class setosa
+#' evi <- data.frame(Species = "setosa")
+#' expct(psi, query = "Sepal.Length", evidence = evi)
+#' 
+#' \dontrun{
+#' # Parallelization with doParallel
+#' doParallel::registerDoParallel(cores = 4)
+#'
+#' # ... or with doFuture
+#' doFuture::registerDoFuture()
+#' future::plan("multisession", workers = 4)
+#' }
 #' 
 #' @seealso
-#' \code{\link{forde}}, \code{\link{forge}}
-#' 
+#' \code{\link{arf}}, \code{\link{forde}}, \code{\link{forge}}, 
+#' \code{\link{expct}}, \code{\link{lik}}
 #' 
 #' @export
 #' @import ranger 
@@ -93,7 +121,7 @@ adversarial_rf <- function(
   i <- b <- cnt <- obs <- tree <- leaf <- N <- . <- NULL
   
   # Prep data
-  x_real <- prep_x(x)
+  x_real <- prep_x(x, verbose)
   n <- nrow(x_real)
   d <- ncol(x_real)
   factor_cols <- sapply(x_real, is.factor)
@@ -104,14 +132,18 @@ adversarial_rf <- function(
   dat <- rbind(data.frame(y = 1L, x_real),
                data.frame(y = 0L, x_synth))
   if (isTRUE(parallel)) {
-    rf0 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
-                  num.trees = num_trees, min.node.size = 2L * min_node_size, 
-                  respect.unordered.factors = TRUE, ...)
+    num.threads <- NULL
   } else {
-    rf0 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
-                  num.trees = num_trees, min.node.size = 2L * min_node_size, 
-                  respect.unordered.factors = TRUE, num.threads = 1L, ...)
+    num.threads <- 1L
   }
+  if (utils::packageVersion("ranger") >= "0.16.1") {
+    min.bucket <- c(min_node_size, 0)
+  } else {
+    min.bucket <- min_node_size
+  }
+  rf0 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
+                num.trees = num_trees, min.bucket = min.bucket, 
+                respect.unordered.factors = TRUE, num.threads = num.threads, ...)
   
   # Recurse
   iters <- 0L
@@ -126,16 +158,16 @@ adversarial_rf <- function(
       # Create synthetic data by sampling from intra-leaf marginals
       nodeIDs <- stats::predict(rf0, x_real, type = 'terminalNodes')$predictions
       tmp <- data.table('tree' = rep(seq_len(num_trees), each = n), 
-                        'leaf' = as.vector(nodeIDs))
-      x_real_dt <- do.call(rbind, lapply(seq_len(num_trees), function(b) {
-        cbind(x_real, tmp[tree == b])
+                        'leaf' = as.integer(nodeIDs))
+      tmp2 <- tmp[sample(.N, n, replace = TRUE)]
+      tmp2 <- unique(tmp2[, cnt := .N, by = .(tree, leaf)])
+      draw_from <- rbindlist(lapply(seq_len(num_trees), function(b) {
+        x_real_b <- cbind(x_real, tmp[tree == b])
+        x_real_b[, factor_cols] <- lapply(x_real_b[, factor_cols, drop = FALSE], as.numeric)
+        merge(tmp2, x_real_b, by = c('tree', 'leaf'), 
+              sort = FALSE)[, N := .N, by = .(tree, leaf)]
       }))
-      x_real_dt[, factor_cols] <- lapply(x_real_dt[, factor_cols, drop = FALSE], as.numeric)
-      tmp <- tmp[sample(.N, n, replace = TRUE)]
-      tmp <- unique(tmp[, cnt := .N, by = .(tree, leaf)])
-      draw_from <- merge(tmp, x_real_dt, by = c('tree', 'leaf'), 
-                         sort = FALSE)[, N := .N, by = .(tree, leaf)]
-      rm(nodeIDs, tmp, x_real_dt)
+      rm(nodeIDs, tmp, tmp2)
       draw_params_within <- unique(draw_from, by = c('tree','leaf'))[, .(cnt, N)]
       adj_absolut_col <- rep(c(0, draw_params_within[-.N, cumsum(N)]), 
                              times = draw_params_within$cnt)
@@ -159,15 +191,9 @@ adversarial_rf <- function(
       dat <- rbind(data.frame(y = 1L, x_real),
                    data.frame(y = 0L, x_synth))
       # Train discriminator
-      if (isTRUE(parallel)) {
-        rf1 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
-                      num.trees = num_trees, min.node.size = 2 * min_node_size, 
-                      respect.unordered.factors = TRUE, ...)
-      } else {
-        rf1 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
-                      num.trees = num_trees, min.node.size = 2 * min_node_size, 
-                      respect.unordered.factors = TRUE, num.threads = 1, ...)
-      }
+      rf1 <- ranger(y ~ ., dat, keep.inbag = TRUE, classification = TRUE, 
+                    num.trees = num_trees, min.bucket = min.bucket, 
+                    respect.unordered.factors = TRUE, num.threads = num.threads, ...)
       # Evaluate
       acc0 <- 1 - rf1$prediction.error
       acc <- c(acc, acc0)
@@ -191,22 +217,29 @@ adversarial_rf <- function(
   if (isTRUE(prune)) {
     pred <- stats::predict(rf0, x_real, type = 'terminalNodes')$predictions + 1L
     prune <- function(tree) {
+      # Nodes to prune are leaves which contain fewer than min_node_size real samples
       out <- rf0$forest$child.nodeIDs[[tree]]
       leaves <- which(out[[1]] == 0L)
       to_prune <- leaves[!(leaves %in% which(tabulate(pred[, tree]) >= min_node_size))]
       while(length(to_prune) > 0) {
+        if (1 %in% to_prune) {
+          # Never prune the root
+          break
+        }
         for (tp in to_prune) {
-          # Find parents
+          # Find parent
           parent <- which((out[[1]] + 1L) == tp)
           if (length(parent) > 0) {
-            # Left child
+            # If node to prune (tp) is the left child of parent, replace left child with right child
             out[[1]][parent] <- out[[2]][parent]
           } else {
-            # Right child
+            # If node to prune (tp) is the right child of parent, replace right child with left child
             parent <- which((out[[2]] + 1L) == tp)
             out[[2]][parent] <- out[[1]][parent]
           }
         }
+        # If both children of a parent are to be pruned, prune the parent in the next round
+        # This happens if both children have been pruned
         to_prune <- which((out[[1]] + 1L) %in% to_prune)
       }
       return(out)
