@@ -29,15 +29,15 @@ ggplot(tmp, aes(Iteration, Accuracy)) +
   geom_hline(yintercept = 0.5, linetype = 'dashed', color = 'red') 
 
 ## ----par, eval=FALSE----------------------------------------------------------
-#  # Register cores - Unix
-#  library(doParallel)
-#  registerDoParallel(cores = 2)
+# # Register cores - Unix
+# library(doParallel)
+# registerDoParallel(cores = 2)
 
 ## ----par2, eval=FALSE---------------------------------------------------------
-#  # Register cores - Windows
-#  library(doParallel)
-#  cl <- makeCluster(2)
-#  registerDoParallel(cl)
+# # Register cores - Windows
+# library(doParallel)
+# cl <- makeCluster(2)
+# registerDoParallel(cl)
 
 ## ----arf3---------------------------------------------------------------------
 # Rerun ARF, now in parallel and with more trees

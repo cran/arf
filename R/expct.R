@@ -233,7 +233,7 @@ expct <- function(
                           sort = FALSE, allow.cartesian = TRUE)
         psi_uncond <- merge(omega, params$cat[variable %in% query, ], by.x = 'f_idx_uncond', by.y = 'f_idx',
                             sort = FALSE, allow.cartesian = TRUE)
-        psi_uncond_relevant <- psi_uncond[!psi_cond[,.(idx, variable)], on = .(idx, variable), all = FALSE]
+        psi_uncond_relevant <- psi_uncond[!psi_cond, on = .(idx, variable)]
         psi <- rbind(psi_cond, psi_uncond_relevant)
       }
       psi[NA_share == 1, wt := 0]
@@ -245,6 +245,26 @@ expct <- function(
     # Create dataset with expectations
     x_synth <- cbind(synth_cnt, synth_cat)
     x_synth <- post_x(x_synth, params, round)
+    
+    if (evidence_row_mode == "separate" & any(omega[, is.na(f_idx)])) {
+      setDT(x_synth)
+      indices_na <- cparams$forest[is.na(f_idx), c_idx]
+      indices_sampled <- cparams$forest[!is.na(f_idx), unique(c_idx)]
+      rows_na <- dcast(rbind(data.table(c_idx = 0, variable = params$meta[,variable]),
+                             cparams$evidence_prepped[c_idx %in% indices_na,],
+                             fill = TRUE),
+                       c_idx ~ variable, value.var = "val")[c_idx != 0,]
+      if (nomatch == "force") {
+        rows_na_sampled <- expct(params, parallel = parallel, stepsize = stepsize)
+        rows_na <- fill_na_rows(rows_na, rows_na_sampled)
+      }
+      # Keep only query columns so output shape matches the no-fallback case
+      rows_na <- rows_na[, c("c_idx", names(x_synth)), with = FALSE]
+      x_synth[, c_idx := indices_sampled]
+      x_synth <- rbind(x_synth, rows_na, fill = TRUE)
+      setorder(x_synth, c_idx)[, c_idx :=  NULL]
+      x_synth <- post_x(x_synth, params, round)
+    }
     
     x_synth
   }

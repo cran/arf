@@ -208,7 +208,7 @@ forde <- function(
       left_child <- arf$forest$child.nodeIDs[[tree]][[1]][i] + 1L
       right_child <- arf$forest$child.nodeIDs[[tree]][[2]][i] + 1L
       splitvarID <- arf$forest$split.varIDs[[tree]][i] + 1L
-      splitval <- arf$forest$split.value[[tree]][i]
+      splitval <- arf$forest$split.values[[tree]][i]
       if (left_child > 1) {
         ub[left_child, ] <- ub[right_child, ] <- ub[i, ]
         lb[left_child, ] <- lb[right_child, ] <- lb[i, ]
@@ -243,6 +243,7 @@ forde <- function(
     keep <- unique(keep[, cnt := .N, by = .(tree, leaf)])
     keep[, n_oob := sum(oob), by = tree]
     keep[, cvg := cnt / n_oob][, c('oob', 'cnt', 'n_oob') := NULL]
+    keep[, cvg := cvg/sum(cvg), by = tree]
   } else if (oob == "inbag") {
     keep[, inbag := as.vector(sapply(seq_len(num_trees), function(b) {
       arf$inbag.counts[[b]][seq_len(n)] > 0L
@@ -251,6 +252,7 @@ forde <- function(
     keep <- unique(keep[, cnt := .N, by = .(tree, leaf)])
     keep[, n_inbag := sum(inbag), by = tree]
     keep[, cvg := cnt / n_inbag][, c('inbag', 'cnt', 'n_inbag') := NULL]
+    keep[, cvg := cvg/sum(cvg), by = tree]
   } else {
     keep <- unique(keep[, cnt := .N, by = .(tree, leaf)])
     keep[, cvg := cnt / n][, cnt := NULL]
@@ -279,19 +281,19 @@ forde <- function(
                   by = c('tree', 'leaf', 'variable'), sort = FALSE)
       # Caculate bounds for finite_bounds == 'local'
       if (finite_bounds == 'local') {
-        dt[, c('min_emp', 'max_emp') := .(min(value, na.rm = T), max(value, na.rm = T)), by = .(leaf, variable)]
+        dt[, c('min_emp', 'max_emp') := .(min(value, na.rm = TRUE), max(value, na.rm = TRUE)), by = .(leaf, variable)]
         dt[, length_emp := max_emp - min_emp]
         # Calculate bounds if min_emp == max_emp in order to be able to sample from cont. distribution
-        length_emp_0_replace <- min(dt[length_emp > 0, min(length_emp, na.rm = T)], max(epsilon, 1e-12))
+        length_emp_0_replace <- min(dt[length_emp > 0, min(length_emp, na.rm = TRUE)], max(epsilon, 1e-12))
         dt[length_emp == 0, c('min_emp', 'max_emp', 'length_emp') := .(min_emp - length_emp_0_replace/2, max_emp + length_emp_0_replace/2, length_emp_0_replace)]
         dt[, c('min', 'max', 'min_emp', 'max_emp', 'length_emp') := .(fifelse(!is.finite(min) & !is.na(min_emp), min_emp - length_emp*(epsilon/2), min),
                                                                       fifelse(!is.finite(max) & !is.na(max_emp), max_emp + length_emp*(epsilon/2), max),
                                                                       NULL, NULL, NULL)]
       }
       if (family == 'truncnorm') {
-        dt[, c('mu', 'sigma', 'NA_share') := .(mean(value, na.rm = T), sd(value, na.rm = T), sum(is.na(value))/.N),
+        dt[, c('mu', 'sigma', 'NA_share') := .(mean(value, na.rm = TRUE), sd(value, na.rm = TRUE), sum(is.na(value))/.N),
            by = .(leaf, variable)]
-        dt[, c('min_emp', 'max_emp') := .(min(value, na.rm = T), max(value, na.rm = T)), by = variable]
+        dt[, c('min_emp', 'max_emp') := .(min(value, na.rm = TRUE), max(value, na.rm = TRUE)), by = variable]
         dt[NA_share == 1, c('min', 'max') := .(fifelse(is.infinite(min), min_emp, min),
                                                fifelse(is.infinite(max), max_emp, max))]
         dt[, c("min_emp", "max_emp") := NULL]
@@ -384,7 +386,7 @@ forde <- function(
         dt <- merge(tmp, dt, by = c('f_idx', 'variable', 'val', 'count', 'k'), 
                     all.x = TRUE, sort = FALSE)
         dt[is.na(val_count), val_count := 0]
-        dt[, NA_share := mean(NA_share, na.rm = T), by = .(f_idx, variable)]
+        dt[, NA_share := mean(NA_share, na.rm = TRUE), by = .(f_idx, variable)]
         # Compute posterior probabilities
         dt[, prob := (val_count + alpha) / (count + alpha * k), by = .(f_idx, variable, val)]
         dt[, c('val_count', 'k') := NULL]
